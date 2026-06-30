@@ -52,20 +52,21 @@
     @media (max-width: 480px) {
       #topbar {
         top:calc(10px + env(safe-area-inset-top));
-        left:10px; right:10px; transform:none;
-        max-width:none; width:auto;
-        padding:6px 10px 6px 9px;
-        gap:7px;
+        left:50%; right:auto; transform:translateX(-50%);
+        max-width:calc(100vw - 90px);  /* deja espacio a los controles de zoom de Leaflet */
+        width:auto;
+        padding:6px 8px;
+        gap:4px;
       }
-      .logo { font-size:13px; gap:5px; }
-      .logo span.logo-text { display:none; }  /* oculta el texto "SafeMap", deja solo el punto */
-      .nb { gap:5px; }
+      .logo { display:none; }  /* en móvil compacto, solo iconos — sin logo para ganar espacio */
+      .nb { gap:4px; width:100%; justify-content:space-between; }
       .nbtn {
         font-size:0;             /* oculta el texto del botón */
-        padding:7px;             /* lo vuelve cuadrado, solo ícono */
+        padding:0;               /* lo vuelve cuadrado, solo ícono */
         width:30px; height:30px;
         display:flex; align-items:center; justify-content:center;
         border-radius:50%;
+        flex-shrink:0;
       }
       .nbtn::before {
         font-size:14px;          /* el ícono sí se muestra, vía contenido CSS */
@@ -82,12 +83,16 @@
 
       #profile { left:10px; right:10px; width:auto; top:64px; }
 
-      #diag { left:10px; right:10px; width:auto; }
+      #diag { left:10px; right:10px; width:auto; bottom:80px; }
     }
 
     @media (max-width: 360px) {
-      #topbar { top:8px; left:8px; right:8px; }
-      .nbtn { width:28px; height:28px; }
+      #topbar {
+        max-width:calc(100vw - 76px);
+        gap:3px; padding:5px 6px;
+      }
+      .nbtn { width:27px; height:27px; }
+      .nbtn::before { font-size:13px; }
     }
 
     /* FAB */
@@ -204,7 +209,7 @@
 
     /* DIAGNOSTIC PANEL */
     #diag {
-      position:fixed; bottom:14px; left:14px; z-index:850; width:280px;
+      position:fixed; bottom:96px; right:14px; left:auto; z-index:850; width:280px;
       background:var(--glass); border:1px solid var(--red); border-radius:var(--r);
       backdrop-filter:blur(18px); box-shadow:var(--sh); padding:14px; display:none;
     }
@@ -423,7 +428,14 @@ function showDiag(items) {
 // MAP SETUP
 // ============================================================
 function setupMap() {
-  map = L.map('map').setView([37.7749, -122.4194], 13);
+  // Desactivamos el control de zoom por defecto (top-left) porque
+  // choca con la barra superior en pantallas angostas. Lo volvemos
+  // a agregar manualmente en la esquina inferior derecha, donde
+  // nunca se cruza con la barra superior ni con el botón flotante.
+  map = L.map('map', { zoomControl: false }).setView([37.7749, -122.4194], 13);
+
+  L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
