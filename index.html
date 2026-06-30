@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
   <title>SafeMap — Reportes de Seguridad Comunitaria</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" />
@@ -33,17 +33,62 @@
       background:var(--glass); border:1px solid var(--border); border-radius:50px;
       padding:7px 14px 7px 11px; backdrop-filter:blur(18px); box-shadow:var(--sh);
       white-space:nowrap;
+      max-width:calc(100vw - 20px);   /* nunca más ancho que la pantalla */
     }
-    .logo { display:flex; align-items:center; gap:7px; font-weight:700; font-size:14px; letter-spacing:.4px; }
-    .dot  { width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 7px var(--amber); animation:blink 2s infinite; }
+    .logo { display:flex; align-items:center; gap:7px; font-weight:700; font-size:14px; letter-spacing:.4px; flex-shrink:0; }
+    .dot  { width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 7px var(--amber); animation:blink 2s infinite; flex-shrink:0; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .nb { display:flex; gap:7px; }
+    .nb { display:flex; gap:7px; overflow-x:auto; scrollbar-width:none; }
+    .nb::-webkit-scrollbar { display:none; }
     .nbtn {
       background:transparent; border:1px solid var(--border); border-radius:18px;
       color:var(--muted); cursor:pointer; font-size:11px; font-family:inherit;
       font-weight:600; padding:4px 11px; transition:all .15s; letter-spacing:.2px;
+      flex-shrink:0;
     }
     .nbtn:hover { background:var(--amber); border-color:var(--amber); color:var(--navy); }
+
+    /* ── RESPONSIVE: pantallas angostas (celulares) ── */
+    @media (max-width: 480px) {
+      #topbar {
+        top:calc(10px + env(safe-area-inset-top));
+        left:10px; right:10px; transform:none;
+        max-width:none; width:auto;
+        padding:6px 10px 6px 9px;
+        gap:7px;
+      }
+      .logo { font-size:13px; gap:5px; }
+      .logo span.logo-text { display:none; }  /* oculta el texto "SafeMap", deja solo el punto */
+      .nb { gap:5px; }
+      .nbtn {
+        font-size:0;             /* oculta el texto del botón */
+        padding:7px;             /* lo vuelve cuadrado, solo ícono */
+        width:30px; height:30px;
+        display:flex; align-items:center; justify-content:center;
+        border-radius:50%;
+      }
+      .nbtn::before {
+        font-size:14px;          /* el ícono sí se muestra, vía contenido CSS */
+      }
+      #btn-notif::before  { content:'🔔'; }
+      #btn-locate::before { content:'📍'; }
+      #btn-reports::before{ content:'📋'; }
+      #btn-profile::before{ content:'👤'; }
+      #btn-logout::before { content:'🚪'; }
+
+      #fab { bottom:20px; right:16px; width:48px; height:48px; font-size:24px; }
+
+      #sidebar { width:100vw; }
+
+      #profile { left:10px; right:10px; width:auto; top:64px; }
+
+      #diag { left:10px; right:10px; width:auto; }
+    }
+
+    @media (max-width: 360px) {
+      #topbar { top:8px; left:8px; right:8px; }
+      .nbtn { width:28px; height:28px; }
+    }
 
     /* FAB */
     #fab {
@@ -210,7 +255,7 @@
 <div id="map"></div>
 
 <div id="topbar">
-  <div class="logo"><div class="dot"></div>SafeMap</div>
+  <div class="logo"><div class="dot"></div><span class="logo-text">SafeMap</span></div>
   <div class="nb">
     <button class="nbtn" id="btn-notif" title="Notificaciones del navegador">🔔</button>
     <button class="nbtn" id="btn-locate">Ubicarme</button>
