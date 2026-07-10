@@ -1,0 +1,20 @@
+{
+  "appId": "com.safemap.app",
+  "appName": "SafeMap",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#F59E0B",
+      "sound": "default"
+    },
+    "Geolocation": {
+      "permissions": {
+        "android": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      }
+    }
+  }
+}

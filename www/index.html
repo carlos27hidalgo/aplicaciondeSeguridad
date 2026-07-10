@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <title>SafeMap — Reportes de Seguridad Comunitaria</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:  #0D1B2A; --panel: #1A2F45; --border: #2A4A6A;
+      --amber: #F59E0B; --ambd:  #D97706; --green:  #10B981;
+      --red:   #EF4444; --sky:   #38BDF8; --text:   #E8EDF2;
+      --muted: #8BA5BE; --glass: rgba(13,27,42,0.92);
+      --r: 10px; --sh: 0 8px 32px rgba(0,0,0,.55);
+    }
+    html, body { height:100%; font-family:'Inter',sans-serif; background:var(--navy); color:var(--text); overflow:hidden; }
+    #map { position:fixed; inset:0; z-index:0; }
+
+    /* TOP BAR */
+    #topbar {
+      position:fixed; top:14px; left:50%; transform:translateX(-50%);
+      z-index:900; display:flex; align-items:center; gap:10px;
+      background:var(--glass); border:1px solid var(--border); border-radius:50px;
+      padding:7px 14px 7px 11px; backdrop-filter:blur(18px); box-shadow:var(--sh);
+      white-space:nowrap; max-width:calc(100vw - 20px);
+    }
+    .logo { display:flex; align-items:center; gap:7px; font-weight:700; font-size:14px; letter-spacing:.4px; flex-shrink:0; }
+    .dot  { width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 7px var(--amber); animation:blink 2s infinite; flex-shrink:0; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .nb { display:flex; gap:7px; overflow-x:auto; scrollbar-width:none; }
+    .nb::-webkit-scrollbar { display:none; }
+    .nbtn {
+      background:transparent; border:1px solid var(--border); border-radius:18px;
+      color:var(--muted); cursor:pointer; font-size:11px; font-family:inherit;
+      font-weight:600; padding:4px 11px; transition:all .15s; letter-spacing:.2px; flex-shrink:0;
+    }
+    .nbtn:hover { background:var(--amber); border-color:var(--amber); color:var(--navy); }
+
+    /* RESPONSIVE MOVIL */
+    @media (max-width: 480px) {
+      #topbar {
+        top:calc(10px + env(safe-area-inset-top));
+        left:10px; right:10px; transform:none;
+        max-width:none; width:auto; padding:6px 10px 6px 12px;
+        gap:8px; justify-content:space-between;
+      }
+      .logo { font-size:13px; gap:5px; }
+      .nb { gap:4px; justify-content:space-between; flex:1; }
+      .nbtn {
+        font-size:0; padding:0; width:30px; height:30px;
+        display:flex; align-items:center; justify-content:center;
+        border-radius:50%; flex-shrink:0;
+      }
+      .nbtn::before { font-size:14px; }
+      #btn-notif::before   { content:'🔔'; }
+      #btn-locate::before  { content:'📍'; }
+      #btn-reports::before { content:'📋'; }
+      #btn-profile::before { content:'👤'; }
+      #btn-logout::before  { content:'🚪'; }
+      #fab { bottom:20px; right:16px; width:48px; height:48px; font-size:24px; }
+      #sidebar { width:100vw; }
+      #profile { left:10px; right:10px; width:auto; top:64px; }
+      #diag { left:10px; right:10px; width:auto; bottom:80px; }
+    }
+    @media (max-width: 380px) {
+      #topbar { gap:5px; padding:6px 8px 6px 10px; }
+      .logo { font-size:12px; }
+      .logo span.logo-text { display:none; }
+      .nb { gap:3px; }
+      .nbtn { width:27px; height:27px; }
+      .nbtn::before { font-size:13px; }
+    }
+
+    /* FAB */
+    #fab {
+      position:fixed; bottom:28px; right:24px; z-index:900;
+      width:52px; height:52px; border-radius:50%;
+      background:var(--amber); border:none; cursor:pointer; font-size:28px;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 4px 18px rgba(245,158,11,.55); transition:transform .15s, box-shadow .15s; line-height:1;
+    }
+    #fab:hover { transform:scale(1.09); box-shadow:0 6px 26px rgba(245,158,11,.7); }
+    #fab.hidden { display:none; }
+
+    /* OVERLAY */
+    #overlay {
+      position:fixed; inset:0; z-index:950;
+      background:rgba(0,0,0,.65); backdrop-filter:blur(5px);
+      display:flex; align-items:center; justify-content:center; padding:16px;
+    }
+    #overlay.hidden { display:none; }
+
+    /* MODAL */
+    .modal {
+      background:var(--panel); border:1px solid var(--border); border-radius:var(--r);
+      box-shadow:var(--sh); padding:26px; width:100%; max-width:410px; animation:up .18s ease;
+    }
+    @keyframes up { from{transform:translateY(16px);opacity:0} to{transform:none;opacity:1} }
+    .modal h2 { font-size:18px; font-weight:700; margin-bottom:18px; }
+
+    /* FORMULARIOS */
+    .field { margin-bottom:13px; }
+    .field label { display:block; font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.9px; margin-bottom:5px; }
+    .field input, .field textarea {
+      width:100%; background:var(--navy); border:1px solid var(--border);
+      border-radius:6px; color:var(--text); font-family:inherit; font-size:14px;
+      padding:9px 11px; outline:none; transition:border-color .15s;
+    }
+    .field input:focus, .field textarea:focus { border-color:var(--amber); }
+    .field textarea { resize:vertical; min-height:78px; }
+    .tgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; }
+    .tbtn {
+      background:var(--navy); border:1px solid var(--border); border-radius:7px;
+      color:var(--muted); cursor:pointer; font-size:11px; font-family:inherit;
+      font-weight:600; padding:9px 4px; display:flex; flex-direction:column;
+      align-items:center; gap:4px; transition:all .15s;
+    }
+    .tbtn .ic { font-size:19px; }
+    .tbtn:hover { border-color:var(--amber); color:var(--text); }
+    .tbtn.sel { background:var(--amber); border-color:var(--amber); color:var(--navy); }
+
+    /* BOTONES */
+    .btn { border:none; border-radius:6px; cursor:pointer; font-family:inherit; font-size:14px; font-weight:600; padding:10px 18px; transition:all .15s; width:100%; }
+    .pri { background:var(--amber); color:var(--navy); }
+    .pri:hover { background:var(--ambd); }
+    .pri:disabled { opacity:.5; cursor:not-allowed; }
+    .ghost { background:transparent; border:1px solid var(--border); color:var(--muted); margin-top:7px; }
+    .ghost:hover { border-color:var(--text); color:var(--text); }
+
+    /* SIDEBAR */
+    #sidebar {
+      position:fixed; top:0; bottom:0; right:0; z-index:800; width:330px;
+      background:var(--glass); border-left:1px solid var(--border); backdrop-filter:blur(22px);
+      transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1);
+      display:flex; flex-direction:column; padding-top:68px;
+    }
+    #sidebar.open { transform:none; }
+    #sbhdr { padding:14px 18px 11px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    #sbhdr h3 { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+    #sbclose { background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; padding:2px 5px; }
+    #sbclose:hover { color:var(--text); }
+    #rlist { overflow-y:auto; flex:1; padding:10px 14px; }
+
+    /* TARJETA DE REPORTE */
+    .card { background:rgba(255,255,255,.035); border:1px solid var(--border); border-radius:8px; margin-bottom:9px; padding:13px; cursor:pointer; transition:border-color .15s; }
+    .card:hover { border-color:var(--amber); }
+    .ctop { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+    .badge { font-size:17px; width:30px; height:30px; border-radius:6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .cmeta { flex:1; min-width:0; }
+    .ctype { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; }
+    .ctime { font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+    .cdesc { font-size:13px; color:var(--muted); line-height:1.5; margin-bottom:9px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .cbar-row { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+    .cbar  { flex:1; height:4px; background:var(--navy); border-radius:2px; overflow:hidden; }
+    .cfill { height:100%; border-radius:2px; transition:width .35s; }
+    .cpct  { font-size:11px; font-family:'JetBrains Mono',monospace; font-weight:600; min-width:30px; text-align:right; }
+    .vrow  { display:flex; gap:6px; }
+    .vbtn  { flex:1; border:1px solid var(--border); border-radius:6px; background:transparent; color:var(--muted); font-family:inherit; font-size:11px; font-weight:700; padding:6px 0; cursor:pointer; transition:all .15s; }
+    .vbtn.cv:hover { background:rgba(16,185,129,.15); border-color:var(--green); color:var(--green); }
+    .vbtn.rv:hover { background:rgba(239,68,68,.15);  border-color:var(--red);   color:var(--red); }
+    .vbtn.vc { background:rgba(16,185,129,.2); border-color:var(--green); color:var(--green); }
+    .vbtn.vr { background:rgba(239,68,68,.2);  border-color:var(--red);   color:var(--red); }
+    .exlbl { font-size:10px; font-family:'JetBrains Mono',monospace; color:var(--muted); flex-shrink:0; }
+    .exlbl.urg { color:var(--red); }
+
+    /* PERFIL */
+    #profile { position:fixed; top:68px; left:14px; z-index:800; width:250px; background:var(--glass); border:1px solid var(--border); border-radius:var(--r); backdrop-filter:blur(22px); box-shadow:var(--sh); padding:18px; display:none; }
+    #profile.open { display:block; animation:up .18s ease; }
+    .pavatar { width:48px; height:48px; border-radius:50%; background:linear-gradient(135deg,var(--amber),var(--sky)); display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:700; color:var(--navy); margin:0 auto 12px; }
+    .pname  { text-align:center; font-size:15px; font-weight:700; margin-bottom:3px; }
+    .pemail { text-align:center; font-size:11px; color:var(--muted); margin-bottom:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pstat  { background:var(--navy); border:1px solid var(--border); border-radius:7px; padding:11px; text-align:center; margin-bottom:8px; }
+    .psval  { font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:600; color:var(--amber); }
+    .pslbl  { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; margin-top:2px; }
+
+    /* DIAGNOSTICO */
+    #diag { position:fixed; bottom:96px; right:14px; z-index:850; width:280px; background:var(--glass); border:1px solid var(--red); border-radius:var(--r); backdrop-filter:blur(18px); box-shadow:var(--sh); padding:14px; display:none; }
+    #diag.open { display:block; animation:up .18s ease; }
+    #diag h4 { font-size:12px; font-weight:700; color:var(--red); margin-bottom:10px; text-transform:uppercase; letter-spacing:.8px; }
+    .ditem { display:flex; align-items:flex-start; gap:8px; margin-bottom:8px; font-size:12px; line-height:1.5; }
+    .ditem .dicon { flex-shrink:0; margin-top:1px; }
+    .ditem .dmsg  { color:var(--muted); }
+    .ditem .dfix  { color:var(--amber); font-size:11px; margin-top:2px; }
+    #diagclose { position:absolute; top:10px; right:12px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:16px; }
+
+    /* TOAST */
+    #toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%); z-index:9999; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:11px 18px; font-size:13px; font-weight:600; box-shadow:var(--sh); opacity:0; transition:opacity .18s; pointer-events:none; white-space:nowrap; }
+    #toast.show { opacity:1; }
+
+    /* LOADER */
+    #loader { position:fixed; inset:0; z-index:9999; background:var(--navy); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
+    #loader.hidden { display:none; }
+    .spin { width:34px; height:34px; border:3px solid var(--border); border-top-color:var(--amber); border-radius:50%; animation:rot .7s linear infinite; }
+    @keyframes rot { to{transform:rotate(360deg)} }
+    #loader p { font-size:13px; color:var(--muted); }
+
+    /* MISC */
+    .errmsg { font-size:12px; color:var(--red); margin-top:7px; min-height:15px; line-height:1.4; }
+    .swlink { text-align:center; font-size:12px; color:var(--muted); margin-top:13px; }
+    .swlink a { color:var(--amber); cursor:pointer; font-weight:700; }
+    hr.div { border:none; border-top:1px solid var(--border); margin:14px 0; }
+    .empty { text-align:center; padding:36px 18px; color:var(--muted); }
+    .empty .ei { font-size:34px; margin-bottom:10px; }
+    .empty p { font-size:13px; line-height:1.6; }
+    .infobox { font-size:12px; color:var(--muted); background:var(--navy); border:1px solid var(--border); border-radius:6px; padding:11px; margin-bottom:14px; line-height:1.7; }
+
+    /* LEAFLET */
+    .leaflet-control-zoom a { background:var(--panel)!important; color:var(--text)!important; border-color:var(--border)!important; }
+    .leaflet-control-zoom a:hover { background:var(--amber)!important; color:var(--navy)!important; }
+    .leaflet-popup-content-wrapper { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:8px; box-shadow:var(--sh); }
+    .leaflet-popup-tip { background:var(--panel); }
+  </style>
+</head>
+<body>
+
+<div id="loader"><div class="spin"></div><p>Cargando SafeMap...</p></div>
+<div id="map"></div>
+
+<div id="topbar">
+  <div class="logo"><div class="dot"></div><span class="logo-text">SafeMap</span></div>
+  <div class="nb">
+    <button class="nbtn" id="btn-notif" title="Notificaciones">&#128276;</button>
+    <button class="nbtn" id="btn-locate">Ubicarme</button>
+    <button class="nbtn" id="btn-reports">Reportes</button>
+    <button class="nbtn" id="btn-profile">Perfil</button>
+    <button class="nbtn" id="btn-logout">Cerrar sesion</button>
+  </div>
+</div>
+
+<button id="fab" class="hidden" title="Nuevo reporte">+</button>
+
+<div id="sidebar">
+  <div id="sbhdr">
+    <h3>Reportes Activos</h3>
+    <button id="sbclose">&#10005;</button>
+  </div>
+  <div id="rlist"></div>
+</div>
+
+<div id="profile"></div>
+
+<div id="diag">
+  <button id="diagclose">&#10005;</button>
+  <h4>&#9888; Problema de configuracion detectado</h4>
+  <div id="diag-body"></div>
+</div>
+
+<div id="overlay" class="hidden"></div>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ============================================================
+// CONFIG — reemplaza estos dos valores con los de tu proyecto
+// La anon key es publica por diseno. Lo que protege tus datos
+// es RLS, que esta activado en todas las tablas.
+// NUNCA pongas aqui la service_role key.
+// ============================================================
+const SUPABASE_URL  = 'https://lnsvmcthudqmzzuvxcfh.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxuc3ZtY3RodWRxbXp6dXZ4Y2ZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzcyNTUsImV4cCI6MjA5ODE1MzI1NX0.OtI_fTClgw6LvtKDhWvxuX6i6dbGJe76u2tNUvCLGIs';
+
+// ============================================================
+// TIPOS DE REPORTE
+// ============================================================
+const TYPES = {
+  accident:   { label:'Accidente',  icon:'&#128663;', color:'#F59E0B' },
+  theft:      { label:'Robo',       icon:'&#128275;', color:'#EF4444' },
+  hazard:     { label:'Peligro',    icon:'&#9888;',   color:'#F97316' },
+  flooding:   { label:'Inundacion', icon:'&#127754;', color:'#38BDF8' },
+  fire:       { label:'Incendio',   icon:'&#128293;', color:'#DC2626' },
+  suspicious: { label:'Sospechoso', icon:'&#128065;', color:'#A855F7' },
+  kidnapping: { label:'Secuestro',  icon:'&#128680;', color:'#B91C1C' },
+};
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+let sb, map, userMarker;
+let markers     = {};
+let currentUser = null;
+let myVotes     = {};
+let rtChan      = null;
+let clickLL     = null;
+
+// ============================================================
+// BOOT
+// ============================================================
+async function boot() {
+  updateNotifButton();
+
+  if (SUPABASE_URL.includes('YOUR_PROJECT_ID') || SUPABASE_ANON.includes('YOUR_ANON_KEY')) {
+    showDiag([{ icon:'&#128273;', msg:'Credenciales de Supabase no configuradas.', fix:'Reemplaza SUPABASE_URL y SUPABASE_ANON en el codigo.' }]);
+    g('loader').classList.add('hidden');
+    return;
+  }
+
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  const probe = await sb.from('profiles').select('id').limit(1);
+  if (probe.error) {
+    showDiag(diagFromError('profiles', probe.error));
+    g('loader').classList.add('hidden');
+    return;
+  }
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    await onLoggedIn();
+  } else {
+    showAuthModal('login');
+  }
+  g('loader').classList.add('hidden');
+}
+
+// ============================================================
+// DIAGNOSTICO
+// ============================================================
+function diagFromError(table, err) {
+  const code = err?.code || '';
+  const msg  = err?.message || String(err);
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError'))
+    return [{ icon:'&#127760;', msg:'No se puede conectar con Supabase.', fix:'Revisa tu SUPABASE_URL en el codigo.' }];
+  if (code === '42P01' || msg.includes('does not exist'))
+    return [{ icon:'&#128451;', msg:'Tabla "' + table + '" no encontrada.', fix:'Ejecuta database.sql en el Editor SQL de Supabase.' }];
+  if (code === '42501' || msg.includes('permission denied'))
+    return [{ icon:'&#128274;', msg:'Permiso denegado — RLS mal configurado.', fix:'Vuelve a ejecutar database.sql.' }];
+  if (msg.includes('JWT') || msg.includes('Invalid API key'))
+    return [{ icon:'&#128273;', msg:'API key invalida.', fix:'Copia la anon public key de Supabase en SUPABASE_ANON.' }];
+  return [{ icon:'&#10060;', msg: msg, fix:'Revisa la consola del navegador.' }];
+}
+
+function showDiag(items) {
+  g('diag-body').innerHTML = items.map(i =>
+    '<div class="ditem"><span class="dicon">' + i.icon + '</span><div><div class="dmsg">' + escHtml(i.msg) + '</div><div class="dfix">' + escHtml(i.fix) + '</div></div></div>'
+  ).join('');
+  g('diag').classList.add('open');
+}
+
+// ============================================================
+// MAPA
+// ============================================================
+function setupMap() {
+  map = L.map('map', { zoomControl: false }).setView([37.7749, -122.4194], 13);
+  L.control.zoom({ position: 'bottomleft' }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(map);
+  map.on('click', (e) => {
+    if (!currentUser) return;
+    clickLL = e.latlng;
+    showNewReportModal();
+  });
+}
+
+// ============================================================
+// AUTH MODAL
+// ============================================================
+function showAuthModal(mode) {
+  const login = mode === 'login';
+  showOverlay(
+    '<div class="modal">' +
+    '<h2>' + (login ? 'Iniciar sesion' : 'Crear cuenta') + '</h2>' +
+    (!login ? '<div class="field"><label>Nombre de usuario</label><input id="f-un" type="text" placeholder="tu_usuario" autocomplete="off" maxlength="20" /></div>' : '') +
+    '<div class="field"><label>Correo electronico</label><input id="f-em" type="email" placeholder="tucorreo@ejemplo.com" /></div>' +
+    '<div class="field"><label>Contrasena</label><input id="f-pw" type="password" placeholder="minimo 6 caracteres" /></div>' +
+    '<div class="errmsg" id="aerr"></div>' +
+    '<button class="btn pri" id="abtn">' + (login ? 'Iniciar sesion' : 'Crear cuenta') + '</button>' +
+    '<p class="swlink">' + (login ? 'Nuevo aqui? <a id="asw">Crear una cuenta</a>' : 'Ya tienes cuenta? <a id="asw">Iniciar sesion</a>') + '</p>' +
+    '</div>'
+  );
+  g('abtn').onclick = () => doAuth(mode);
+  g('asw').onclick  = () => showAuthModal(login ? 'register' : 'login');
+  ['f-em','f-pw','f-un'].forEach(id => {
+    const el = g(id);
+    if (el) el.onkeydown = e => { if (e.key === 'Enter') doAuth(mode); };
+  });
+  setTimeout(() => (g('f-un') || g('f-em'))?.focus(), 50);
+}
+
+async function doAuth(mode) {
+  const email = v('f-em');
+  const pw    = v('f-pw');
+  const err   = g('aerr');
+  const btn   = g('abtn');
+
+  if (!email)        { err.textContent = 'El correo es obligatorio.'; return; }
+  if (!pw)           { err.textContent = 'La contrasena es obligatoria.'; return; }
+  if (pw.length < 6) { err.textContent = 'La contrasena debe tener al menos 6 caracteres.'; return; }
+  if (!email.includes('@')) { err.textContent = 'Ingresa un correo valido.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Espera un momento...';
+  err.textContent = '';
+
+  if (mode === 'register') {
+    const username = v('f-un');
+    if (!username) { err.textContent = 'El nombre de usuario es obligatorio.'; btn.disabled=false; btn.textContent='Crear cuenta'; return; }
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) { err.textContent = 'Usuario: 3-20 caracteres, letras, numeros y guion bajo.'; btn.disabled=false; btn.textContent='Crear cuenta'; return; }
+
+    const { data, error } = await sb.auth.signUp({ email, password: pw, options: { data: { username } } });
+
+    if (error) { err.textContent = friendlyAuthError(error); btn.disabled=false; btn.textContent='Crear cuenta'; return; }
+
+    if (data?.session) {
+      currentUser = data.user;
+      closeOverlay();
+      await onLoggedIn();
+    } else if (data?.user) {
+      showOverlay(
+        '<div class="modal"><h2>Revisa tu correo</h2>' +
+        '<p style="color:var(--muted);font-size:14px;line-height:1.7;margin-bottom:14px">Enviamos un enlace a <strong style="color:var(--text)">' + escHtml(email) + '</strong>. Haz clic en el para verificar tu cuenta.</p>' +
+        '<div class="infobox"><strong>Para omitir confirmacion:</strong><br>Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Email &rarr; desactiva <em>Confirm email</em>.</div>' +
+        '<button class="btn pri" id="go-login">Ir a iniciar sesion</button></div>'
+      );
+      g('go-login').onclick = () => showAuthModal('login');
+    } else {
+      err.textContent = 'Respuesta inesperada. Revisa la consola.';
+      btn.disabled=false; btn.textContent='Crear cuenta';
+    }
+  } else {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+    if (error) { err.textContent = friendlyAuthError(error); btn.disabled=false; btn.textContent='Iniciar sesion'; return; }
+    currentUser = data.user;
+    closeOverlay();
+    await onLoggedIn();
+  }
+}
+
+function friendlyAuthError(error) {
+  const m = (error.message || '').toLowerCase();
+  if (m.includes('user already registered') || m.includes('already been registered')) return 'Ya existe una cuenta con este correo.';
+  if (m.includes('invalid login credentials') || m.includes('invalid email or password')) return 'Correo o contrasena incorrectos.';
+  if (m.includes('email not confirmed')) return 'Confirma tu correo primero.';
+  if (m.includes('password should be')) return 'La contrasena debe tener al menos 6 caracteres.';
+  if (m.includes('failed to fetch') || m.includes('networkerror')) return 'No se puede conectar al servidor.';
+  return error.message || 'Algo salio mal. Intenta de nuevo.';
+}
+
+// ============================================================
+// POST-LOGIN
+// ============================================================
+async function onLoggedIn() {
+  if (!map) setupMap();
+  g('fab').classList.remove('hidden');
+  const { data: votes } = await sb.from('votes').select('report_id, vote').eq('user_id', currentUser.id);
+  if (votes) votes.forEach(v => { myVotes[v.report_id] = v.vote; });
+  await loadReports();
+  subscribeRealtime();
+  locateUser();
+  requestNotificationPermission();
+}
+
+async function doLogout() {
+  await sb.auth.signOut();
+  currentUser = null; myVotes = {};
+  if (rtChan) { sb.removeChannel(rtChan); rtChan = null; }
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  closeSidebar(); closeProfile();
+  g('fab').classList.add('hidden');
+  showAuthModal('login');
+}
+
+// ============================================================
+// REPORTES
+// ============================================================
+async function loadReports() {
+  const { data, error } = await sb.from('reports').select('*').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false });
+  if (error) { showToast('No se pudieron cargar los reportes.'); return; }
+  (data || []).forEach(putMarker);
+}
+
+function putMarker(r) {
+  const t = TYPES[r.type] || TYPES.hazard;
+  const icon = L.divIcon({
+    className: '',
+    html: '<div style="background:' + t.color + ';width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(45deg);font-size:15px;line-height:1">' + t.icon + '</span></div>',
+    iconSize: [34, 34], iconAnchor: [17, 34],
+  });
+  if (markers[r.id]) map.removeLayer(markers[r.id]);
+  const m = L.marker([r.lat, r.lng], { icon }).addTo(map);
+  m.on('click', () => showReportDetail(r.id));
+  markers[r.id] = m;
+}
+
+// ============================================================
+// SIDEBAR
+// ============================================================
+async function openSidebar() {
+  const { data, error } = await sb.from('reports').select('*').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false });
+  const list = g('rlist');
+  if (error || !data?.length) {
+    list.innerHTML = '<div class="empty"><div class="ei">&#128507;</div><p>No hay reportes activos.<br>Haz clic en el mapa para agregar uno.</p></div>';
+  } else {
+    list.innerHTML = data.map(cardHTML).join('');
+    data.forEach(r => {
+      g('vc-' + r.id).onclick = e => { e.stopPropagation(); castVote(r.id, 'confirm'); };
+      g('vr-' + r.id).onclick = e => { e.stopPropagation(); castVote(r.id, 'reject'); };
+      g('c-'  + r.id).onclick = () => map.flyTo([r.lat, r.lng], 16, { duration: 1 });
+    });
+  }
+  g('sidebar').classList.add('open');
+}
+
+async function openSidebarAt(id) {
+  await openSidebar();
+  g('c-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Muestra el detalle de UN solo reporte en el overlay (al hacer clic en el marcador del mapa)
+async function showReportDetail(reportId) {
+  const { data: r, error } = await sb.from('reports').select('*').eq('id', reportId).single();
+  if (error || !r) { showToast('No se pudo cargar el reporte.'); return; }
+
+  const t   = TYPES[r.type] || TYPES.hazard;
+  const exp = expiresIn(r.expires_at);
+  const vt  = myVotes[r.id];
+  const cc  = r.confidence >= 70 ? '#10B981' : r.confidence >= 40 ? '#F59E0B' : '#EF4444';
+  const mono = 'JetBrains Mono, monospace';
+
+  showOverlay(`
+    <div class="modal" style="max-width:440px">
+
+      <!-- Cabecera -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+        <div style="width:44px;height:44px;border-radius:10px;background:${t.color}22;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">
+          ${t.icon}
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:${t.color}">
+            ${t.label}
+          </div>
+          <div style="font-size:11px;color:var(--muted);font-family:${mono};margin-top:2px">
+            ${timeAgo(r.created_at)} &bull; expira en ${exp.txt}
+          </div>
+        </div>
+        <button onclick="closeOverlay()" style="margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;line-height:1;flex-shrink:0">&#10005;</button>
+      </div>
+
+      <!-- Descripcion -->
+      <p style="font-size:14px;line-height:1.7;color:var(--text);margin-bottom:18px">
+        ${escHtml(r.description)}
+      </p>
+
+      <!-- Ubicacion -->
+      <div style="font-size:11px;color:var(--muted);font-family:${mono};margin-bottom:18px;background:var(--navy);border:1px solid var(--border);border-radius:6px;padding:9px 11px">
+        &#128205; ${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}
+      </div>
+
+      <!-- Barra de confianza -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <span style="font-size:12px;color:var(--muted);flex-shrink:0">Confianza</span>
+        <div style="flex:1;height:6px;background:var(--navy);border-radius:3px;overflow:hidden">
+          <div style="height:100%;border-radius:3px;background:${cc};width:${r.confidence}%"></div>
+        </div>
+        <span style="font-size:13px;font-family:${mono};font-weight:700;color:${cc};min-width:36px;text-align:right">
+          ${r.confidence}%
+        </span>
+      </div>
+
+      <!-- Votos -->
+      <div style="display:flex;gap:8px">
+        <button class="vbtn cv${vt === 'confirm' ? ' vc' : ''}" id="det-confirm" style="padding:10px 0;font-size:13px">
+          &#10003; Confirmar (${r.confirms})
+        </button>
+        <button class="vbtn rv${vt === 'reject' ? ' vr' : ''}" id="det-reject" style="padding:10px 0;font-size:13px">
+          &#10005; Rechazar (${r.rejects})
+        </button>
+      </div>
+
+    </div>
+  `);
+
+  g('det-confirm').onclick = async () => { await castVote(r.id, 'confirm'); closeOverlay(); showReportDetail(r.id); };
+  g('det-reject').onclick  = async () => { await castVote(r.id, 'reject');  closeOverlay(); showReportDetail(r.id); };
+}
+
+function closeSidebar() { g('sidebar').classList.remove('open'); }
+
+function cardHTML(r) {
+  const t  = TYPES[r.type] || TYPES.hazard;
+  const exp = expiresIn(r.expires_at);
+  const vt  = myVotes[r.id];
+  const cc  = r.confidence >= 70 ? '#10B981' : r.confidence >= 40 ? '#F59E0B' : '#EF4444';
+  return (
+    '<div class="card" id="c-' + r.id + '">' +
+    '<div class="ctop">' +
+    '<div class="badge" style="background:' + t.color + '22">' + t.icon + '</div>' +
+    '<div class="cmeta"><div class="ctype" style="color:' + t.color + '">' + t.label + '</div><div class="ctime">' + timeAgo(r.created_at) + '</div></div>' +
+    '<span class="exlbl' + (exp.urg ? ' urg' : '') + '">' + exp.txt + '</span>' +
+    '</div>' +
+    '<p class="cdesc">' + escHtml(r.description) + '</p>' +
+    '<div class="cbar-row"><div class="cbar"><div class="cfill" style="width:' + r.confidence + '%;background:' + cc + '"></div></div><span class="cpct" style="color:' + cc + '">' + r.confidence + '%</span></div>' +
+    '<div class="vrow">' +
+    '<button class="vbtn cv' + (vt === 'confirm' ? ' vc' : '') + '" id="vc-' + r.id + '">&#10003; Confirmar (' + r.confirms + ')</button>' +
+    '<button class="vbtn rv' + (vt === 'reject'  ? ' vr' : '') + '" id="vr-' + r.id + '">&#10005; Rechazar ('  + r.rejects  + ')</button>' +
+    '</div></div>'
+  );
+}
+
+// ============================================================
+// VOTOS
+// ============================================================
+async function castVote(reportId, vote) {
+  if (!currentUser) { showToast('Inicia sesion para votar'); return; }
+  if (myVotes[reportId] === vote) { showToast('Ya votaste asi'); return; }
+  const { error } = await sb.from('votes').upsert(
+    { report_id: reportId, user_id: currentUser.id, vote },
+    { onConflict: 'report_id,user_id' }
+  );
+  if (error) { showToast('Error al votar: ' + error.message); return; }
+  myVotes[reportId] = vote;
+  showToast(vote === 'confirm' ? 'Confirmado!' : 'Rechazado');
+}
+
+// ============================================================
+// NUEVO REPORTE
+// ============================================================
+function showNewReportModal() {
+  let selType = null;
+  const typeButtons = Object.entries(TYPES).map(([k, t]) =>
+    '<button class="tbtn" data-t="' + k + '"><span class="ic">' + t.icon + '</span>' + t.label + '</button>'
+  ).join('');
+
+  showOverlay(
+    '<div class="modal"><h2>Nuevo Reporte</h2>' +
+    '<div class="field"><label>Tipo</label><div class="tgrid" id="tg">' + typeButtons + '</div></div>' +
+    '<div class="field"><label>Descripcion</label><textarea id="rd" placeholder="Describe lo que esta pasando. Se especifico y breve."></textarea></div>' +
+    '<div class="field"><label>Ubicacion</label><div id="rloc" style="font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;padding:6px 0">' +
+    (clickLL ? clickLL.lat.toFixed(5) + ', ' + clickLL.lng.toFixed(5) : 'Detectando GPS...') + '</div></div>' +
+    '<div class="errmsg" id="rerr"></div>' +
+    '<button class="btn pri" id="rsub">Enviar Reporte</button>' +
+    '<button class="btn ghost" id="rcan">Cancelar</button></div>'
+  );
+
+  if (!clickLL) {
+    navigator.geolocation?.getCurrentPosition(pos => {
+      clickLL = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      const el = g('rloc');
+      if (el) el.textContent = clickLL.lat.toFixed(5) + ', ' + clickLL.lng.toFixed(5);
+    }, () => { const el = g('rloc'); if (el) el.textContent = 'GPS no disponible. Haz clic en el mapa.'; });
+  }
+
+  g('tg').onclick = e => {
+    const b = e.target.closest('.tbtn');
+    if (!b) return;
+    selType = b.dataset.t;
+    document.querySelectorAll('.tbtn').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel');
+  };
+  g('rsub').onclick = () => submitReport(selType);
+  g('rcan').onclick = () => { closeOverlay(); clickLL = null; };
+}
+
+async function submitReport(type) {
+  const desc = v('rd');
+  const err  = g('rerr');
+  const btn  = g('rsub');
+  if (!type)    { err.textContent = 'Selecciona un tipo de reporte.'; return; }
+  if (!desc)    { err.textContent = 'Agrega una descripcion.'; return; }
+  if (!clickLL) { err.textContent = 'Ubicacion requerida. Haz clic en el mapa.'; return; }
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  const { data, error } = await sb.from('reports').insert({
+    user_id: currentUser.id, type, description: desc, lat: clickLL.lat, lng: clickLL.lng,
+  }).select().single();
+  if (error) { err.textContent = error.message; btn.disabled=false; btn.textContent='Enviar Reporte'; return; }
+  clickLL = null; closeOverlay(); putMarker(data); showToast('Reporte enviado!');
+}
+
+// ============================================================
+// PERFIL
+// ============================================================
+async function showProfile() {
+  const p = g('profile');
+  if (p.classList.contains('open')) { closeProfile(); return; }
+  const [{ data: prof }, { count: total }] = await Promise.all([
+    sb.from('profiles').select('*').eq('id', currentUser.id).single(),
+    sb.from('reports').select('*', { count:'exact', head:true }).eq('user_id', currentUser.id),
+  ]);
+  p.innerHTML =
+    '<div class="pavatar">' + (prof?.username || 'U')[0].toUpperCase() + '</div>' +
+    '<div class="pname">@' + escHtml(prof?.username || 'desconocido') + '</div>' +
+    '<div class="pemail">' + escHtml(currentUser.email) + '</div>' +
+    '<div class="pstat"><div class="psval">' + (prof?.reputation ?? 0) + '</div><div class="pslbl">Reputacion</div></div>' +
+    '<div class="pstat"><div class="psval">' + (total ?? 0) + '</div><div class="pslbl">Reportes enviados</div></div>' +
+    '<hr class="div"><p style="font-size:11px;color:var(--muted);line-height:1.7">+1 reputacion cuando tu reporte es confirmado.<br>-1 cuando es rechazado.</p>';
+  p.classList.add('open');
+}
+function closeProfile() { g('profile').classList.remove('open'); }
+
+// ============================================================
+// GEOLOCALIZACION
+// ============================================================
+async function locateUser() {
+  if (isCapacitor()) {
+    try {
+      const { Geolocation } = window.Capacitor.Plugins;
+      const perm = await Geolocation.requestPermissions();
+      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') { showToast('Permiso de ubicacion denegado'); return; }
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
+      renderUserMarker(pos.coords.latitude, pos.coords.longitude);
+    } catch (e) { showToast('No se pudo obtener tu ubicacion'); }
+    return;
+  }
+  if (!navigator.geolocation) { showToast('Geolocalizacion no compatible'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => renderUserMarker(pos.coords.latitude, pos.coords.longitude),
+    () => showToast('No se pudo obtener tu ubicacion'),
+    { enableHighAccuracy: true }
+  );
+}
+
+function renderUserMarker(lat, lng) {
+  if (userMarker) map.removeLayer(userMarker);
+  const icon = L.divIcon({
+    className: '',
+    html: '<div style="width:14px;height:14px;background:#38BDF8;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 6px rgba(56,189,248,.22)"></div>',
+    iconSize:[14,14], iconAnchor:[7,7],
+  });
+  userMarker = L.marker([lat, lng], { icon }).addTo(map).bindPopup('<strong>Estas aqui</strong>');
+  map.flyTo([lat, lng], 15, { duration: 1.1 });
+}
+
+// ============================================================
+// REALTIME
+// ============================================================
+function subscribeRealtime() {
+  if (rtChan) sb.removeChannel(rtChan);
+  rtChan = sb.channel('sm-rt')
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'reports' }, ({ new:r }) => {
+      if (new Date(r.expires_at) > new Date()) {
+        putMarker(r);
+        if (!currentUser || r.user_id !== currentUser.id) {
+          const label = TYPES[r.type]?.label || 'incidente';
+          showToast('Nuevo reporte de ' + label + ' cerca');
+          notifyUser('Nuevo reporte: ' + label, r.description?.slice(0, 90) || 'Toca para ver en SafeMap');
+        }
+        if (g('sidebar').classList.contains('open')) openSidebar();
+      }
+    })
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'reports' }, ({ new:r }) => {
+      putMarker(r);
+      if (g('sidebar').classList.contains('open')) openSidebar();
+    })
+    .on('postgres_changes', { event:'DELETE', schema:'public', table:'reports' }, ({ old:r }) => {
+      if (markers[r.id]) { map.removeLayer(markers[r.id]); delete markers[r.id]; }
+      if (g('sidebar').classList.contains('open')) openSidebar();
+    })
+    .subscribe();
+}
+
+// ============================================================
+// NOTIFICACIONES — dual: Capacitor (APK) o Web (navegador)
+//
+// En APK usa @capacitor/local-notifications (nativo Android).
+// En navegador usa la Web Notifications API.
+// El mismo index.html funciona en ambos entornos.
+// ============================================================
+
+// Detecta si el HTML corre dentro del APK de Capacitor
+function isCapacitor() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform?.());
+}
+
+// Acceso seguro a un plugin de Capacitor — devuelve null si no existe
+function cap(name) {
+  try { return window.Capacitor?.Plugins?.[name] || null; }
+  catch (e) { return null; }
+}
+
+// Pide permiso segun el entorno. Se llama una vez al hacer login.
+async function requestNotificationPermission() {
+  if (isCapacitor()) {
+    const LN = cap('LocalNotifications');
+    if (!LN) { console.warn('LocalNotifications plugin no encontrado. Corre: npm install @capacitor/local-notifications && npx cap sync'); updateNotifButton(); return; }
+    try {
+      // Paso 1: pedir permiso de sistema (Android 13+)
+      const perm = await LN.requestPermissions();
+      console.log('Permiso notificaciones:', perm.display);
+
+      // Paso 2: crear canal de notificacion (requerido en Android 8+)
+      await LN.createChannel({
+        id:          'safemap-alerts',
+        name:        'Alertas SafeMap',
+        description: 'Notificaciones de nuevos reportes de seguridad',
+        importance:  5,        // IMPORTANCE_HIGH — aparece como heads-up
+        sound:       'default',
+        vibration:   true,
+        visibility:  1,        // VISIBILITY_PUBLIC
+      });
+      console.log('Canal de notificacion creado');
+    } catch (e) {
+      console.warn('Error al configurar notificaciones:', e);
+    }
+  } else {
+    // Navegador web
+    if (!('Notification' in window)) { updateNotifButton(); return; }
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (e) {}
+    }
+  }
+  updateNotifButton();
+}
+
+// Actualiza el icono de la campana segun el estado del permiso
+async function updateNotifButton() {
+  const btn = g('btn-notif');
+  if (!btn) return;
+
+  if (isCapacitor()) {
+    const LN = cap('LocalNotifications');
+    if (!LN) { btn.textContent = '&#128277;'; btn.title = 'Plugin de notificaciones no disponible'; return; }
+    try {
+      const perm = await LN.checkPermissions();
+      if (perm.display === 'granted') {
+        btn.textContent = '&#128276;'; btn.title = 'Notificaciones nativas activas';
+      } else {
+        btn.textContent = '&#128277;'; btn.title = 'Toca para activar notificaciones';
+      }
+    } catch (e) {
+      btn.textContent = '&#128276;'; btn.title = 'Notificaciones Android';
+    }
+    return;
+  }
+
+  // Navegador
+  if (!('Notification' in window)) { btn.textContent = '&#128277;'; btn.title = 'Navegador sin soporte'; return; }
+  if (Notification.permission === 'granted')      { btn.textContent = '&#128276;'; btn.title = 'Notificaciones activadas'; }
+  else if (Notification.permission === 'denied')  { btn.textContent = '&#128277;'; btn.title = 'Notificaciones bloqueadas'; }
+  else                                            { btn.textContent = '&#128276;'; btn.title = 'Toca para activar notificaciones'; }
+}
+
+// Envia la notificacion usando el sistema correcto para el entorno
+async function notifyUser(title, body) {
+  if (isCapacitor()) {
+    const LN = cap('LocalNotifications');
+    if (!LN) return;
+    try {
+      // Verificar permiso antes de disparar
+      const perm = await LN.checkPermissions();
+      if (perm.display !== 'granted') {
+        console.warn('Notificacion no enviada: permiso no concedido');
+        return;
+      }
+      await LN.schedule({
+        notifications: [{
+          title,
+          body,
+          id:          Date.now() % 2147483647, // ID unico, maximo int32
+          channelId:   'safemap-alerts',        // canal creado en requestNotificationPermission
+          schedule:    { at: new Date(Date.now() + 300) }, // 300ms para dar tiempo al sistema
+          sound:       'default',
+          smallIcon:   'ic_stat_icon_config_sample',
+          largeIcon:   '',
+          actionTypeId: '',
+          extra:        null,
+          ongoing:      false,
+          autoCancel:   true,
+        }],
+      });
+    } catch (e) {
+      console.warn('Error al enviar notificacion nativa:', e.message || e);
+    }
+  } else {
+    // Navegador web
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification(title, {
+        body,
+        icon: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        tag:  'safemap-report',
+        silent: false,
+      });
+      n.onclick = () => { window.focus(); n.close(); };
+      setTimeout(() => n.close(), 8000);
+    } catch (e) {
+      console.warn('Error notificacion web:', e);
+    }
+  }
+}
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function showOverlay(html) {
+  const el = g('overlay');
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+  el.onclick = e => { if (e.target === el) { closeOverlay(); clickLL = null; } };
+}
+function closeOverlay() { g('overlay').classList.add('hidden'); }
+
+let _tt;
+function showToast(msg) {
+  const el = g('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_tt);
+  _tt = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function timeAgo(iso) {
+  const m = Math.floor((Date.now() - new Date(iso)) / 60000);
+  if (m < 1)  return 'justo ahora';
+  if (m < 60) return 'hace ' + m + 'm';
+  const h = Math.floor(m / 60);
+  if (h < 24) return 'hace ' + h + 'h';
+  return 'hace ' + Math.floor(h / 24) + 'd';
+}
+
+function expiresIn(iso) {
+  const ms = new Date(iso) - Date.now();
+  if (ms <= 0) return { txt:'Expirado', urg:true };
+  const h = Math.floor(ms / 3600000);
+  if (h < 1) return { txt:'< 1h', urg:true };
+  if (h < 6) return { txt:h + 'h', urg:true };
+  return { txt:h + 'h', urg:false };
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const g = id => document.getElementById(id);
+const v = id => (g(id)?.value || '').trim();
+
+// ============================================================
+// INICIO
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  g('btn-locate').onclick  = locateUser;
+  g('btn-reports').onclick = () => g('sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
+  g('btn-profile').onclick = showProfile;
+  g('btn-logout').onclick  = doLogout;
+  g('sbclose').onclick     = closeSidebar;
+  g('diagclose').onclick   = () => g('diag').classList.remove('open');
+  g('fab').onclick         = () => { clickLL = null; showNewReportModal(); };
+
+  g('btn-notif').onclick = async () => {
+    if (isCapacitor()) {
+      const LN = cap('LocalNotifications');
+      if (!LN) { showToast('Plugin de notificaciones no instalado. Corre: npx cap sync'); return; }
+      const perm = await LN.checkPermissions().catch(() => ({ display: 'denied' }));
+      if (perm.display === 'granted') {
+        showToast('Notificaciones nativas activas');
+      } else {
+        await requestNotificationPermission();
+        const perm2 = await LN.checkPermissions().catch(() => ({ display: 'denied' }));
+        showToast(perm2.display === 'granted' ? 'Notificaciones activadas!' : 'Activa las notificaciones en Ajustes del telefono');
+      }
+      updateNotifButton();
+      return;
+    }
+    // Navegador web
+    if (!('Notification' in window)) { showToast('Navegador sin soporte de notificaciones'); return; }
+    if (Notification.permission === 'denied') { showToast('Notificaciones bloqueadas. Activaias en Ajustes del navegador.'); return; }
+    if (Notification.permission === 'granted') { showToast('Las notificaciones ya estan activadas'); return; }
+    await Notification.requestPermission();
+    updateNotifButton();
+    showToast(Notification.permission === 'granted' ? 'Notificaciones activadas!' : 'Permiso no concedido');
+  };
+
+  document.addEventListener('click', e => {
+    const p = g('profile');
+    if (p.classList.contains('open') && !p.contains(e.target) && e.target !== g('btn-profile')) closeProfile();
+  });
+
+  boot();
+});
+</script>
+</body>
+</html>
