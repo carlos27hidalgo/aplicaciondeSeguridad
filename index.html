@@ -755,50 +755,66 @@ function subscribeRealtime() {
 }
 
 // ============================================================
-// NOTIFICACIONES — dual: Capacitor (APK) o Web (navegador)
+// NOTIFICACIONES — FCM (Firebase Cloud Messaging)
 //
-// En APK usa @capacitor/local-notifications (nativo Android).
-// En navegador usa la Web Notifications API.
-// El mismo index.html funciona en ambos entornos.
+// En APK: usa @capacitor-firebase/messaging para recibir
+//   notificaciones push aunque la app este cerrada.
+// En navegador: usa la Web Notifications API.
 // ============================================================
 
-// Detecta si el HTML corre dentro del APK de Capacitor
 function isCapacitor() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform?.());
 }
 
-// Acceso seguro a un plugin de Capacitor — devuelve null si no existe
 function cap(name) {
   try { return window.Capacitor?.Plugins?.[name] || null; }
   catch (e) { return null; }
 }
 
-// Pide permiso segun el entorno. Se llama una vez al hacer login.
+// Pide permiso y registra el token FCM para recibir notificaciones push
 async function requestNotificationPermission() {
   if (isCapacitor()) {
-    const LN = cap('LocalNotifications');
-    if (!LN) { console.warn('LocalNotifications plugin no encontrado. Corre: npm install @capacitor/local-notifications && npx cap sync'); updateNotifButton(); return; }
+    const FCM = cap('FirebaseMessaging');
+    if (!FCM) { console.warn('FirebaseMessaging no encontrado. Corre: npm install @capacitor-firebase/messaging && npx cap sync'); updateNotifButton(); return; }
     try {
-      // Paso 1: pedir permiso de sistema (Android 13+)
-      const perm = await LN.requestPermissions();
-      console.log('Permiso notificaciones:', perm.display);
+      // Paso 1: pedir permiso de notificaciones (Android 13+)
+      const perm = await FCM.requestPermissions();
+      console.log('Permiso FCM:', perm.receive);
 
-      // Paso 2: crear canal de notificacion (requerido en Android 8+)
-      await LN.createChannel({
-        id:          'safemap-alerts',
-        name:        'Alertas SafeMap',
-        description: 'Notificaciones de nuevos reportes de seguridad',
-        importance:  5,        // IMPORTANCE_HIGH — aparece como heads-up
-        sound:       'default',
-        vibration:   true,
-        visibility:  1,        // VISIBILITY_PUBLIC
-      });
-      console.log('Canal de notificacion creado');
+      if (perm.receive === 'granted') {
+        // Paso 2: obtener el token FCM de este dispositivo
+        const { token } = await FCM.getToken();
+        console.log('Token FCM:', token);
+
+        // Paso 3: guardar el token en Supabase asociado al usuario
+        // para que la Edge Function sepa a quien enviar la notificacion
+        if (currentUser && token) {
+          await sb.from('device_tokens').upsert({
+            user_id:    currentUser.id,
+            token,
+            platform:   'android',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id' });
+        }
+
+        // Paso 4: escuchar notificaciones en background y cuando se toca
+        FCM.addListener('notificationActionPerformed', (action) => {
+          const reportId = action.notification?.data?.report_id;
+          if (reportId) showReportDetail(reportId);
+        });
+
+        // Paso 5: escuchar notificaciones con app en primer plano
+        FCM.addListener('notificationReceived', (notification) => {
+          const title = notification.notification?.title || 'SafeMap';
+          const body  = notification.notification?.body  || '';
+          showToast(title + ': ' + body);
+        });
+      }
     } catch (e) {
-      console.warn('Error al configurar notificaciones:', e);
+      console.warn('Error al configurar FCM:', e);
     }
   } else {
-    // Navegador web
+    // Navegador web — Web Notifications API estandar
     if (!('Notification' in window)) { updateNotifButton(); return; }
     if (Notification.permission === 'default') {
       try { await Notification.requestPermission(); } catch (e) {}
@@ -807,81 +823,43 @@ async function requestNotificationPermission() {
   updateNotifButton();
 }
 
-// Actualiza el icono de la campana segun el estado del permiso
+// Actualiza el icono de la campana segun el estado
 async function updateNotifButton() {
   const btn = g('btn-notif');
   if (!btn) return;
-
   if (isCapacitor()) {
-    const LN = cap('LocalNotifications');
-    if (!LN) { btn.textContent = '&#128277;'; btn.title = 'Plugin de notificaciones no disponible'; return; }
+    const FCM = cap('FirebaseMessaging');
+    if (!FCM) { btn.textContent = '&#128277;'; btn.title = 'Plugin FCM no instalado'; return; }
     try {
-      const perm = await LN.checkPermissions();
-      if (perm.display === 'granted') {
-        btn.textContent = '&#128276;'; btn.title = 'Notificaciones nativas activas';
+      const perm = await FCM.checkPermissions();
+      if (perm.receive === 'granted') {
+        btn.textContent = '&#128276;'; btn.title = 'Notificaciones push activas';
       } else {
         btn.textContent = '&#128277;'; btn.title = 'Toca para activar notificaciones';
       }
-    } catch (e) {
-      btn.textContent = '&#128276;'; btn.title = 'Notificaciones Android';
-    }
+    } catch (e) { btn.textContent = '&#128276;'; }
     return;
   }
-
-  // Navegador
   if (!('Notification' in window)) { btn.textContent = '&#128277;'; btn.title = 'Navegador sin soporte'; return; }
-  if (Notification.permission === 'granted')      { btn.textContent = '&#128276;'; btn.title = 'Notificaciones activadas'; }
-  else if (Notification.permission === 'denied')  { btn.textContent = '&#128277;'; btn.title = 'Notificaciones bloqueadas'; }
-  else                                            { btn.textContent = '&#128276;'; btn.title = 'Toca para activar notificaciones'; }
+  if (Notification.permission === 'granted')     { btn.textContent = '&#128276;'; btn.title = 'Notificaciones activadas'; }
+  else if (Notification.permission === 'denied') { btn.textContent = '&#128277;'; btn.title = 'Notificaciones bloqueadas'; }
+  else                                           { btn.textContent = '&#128276;'; btn.title = 'Toca para activar'; }
 }
 
-// Envia la notificacion usando el sistema correcto para el entorno
+// En el APK las notificaciones las envia Firebase desde el servidor.
+// Esta funcion solo se usa en el navegador web.
 async function notifyUser(title, body) {
-  if (isCapacitor()) {
-    const LN = cap('LocalNotifications');
-    if (!LN) return;
-    try {
-      // Verificar permiso antes de disparar
-      const perm = await LN.checkPermissions();
-      if (perm.display !== 'granted') {
-        console.warn('Notificacion no enviada: permiso no concedido');
-        return;
-      }
-      await LN.schedule({
-        notifications: [{
-          title,
-          body,
-          id:          Date.now() % 2147483647, // ID unico, maximo int32
-          channelId:   'safemap-alerts',        // canal creado en requestNotificationPermission
-          schedule:    { at: new Date(Date.now() + 300) }, // 300ms para dar tiempo al sistema
-          sound:       'default',
-          smallIcon:   'ic_stat_icon_config_sample',
-          largeIcon:   '',
-          actionTypeId: '',
-          extra:        null,
-          ongoing:      false,
-          autoCancel:   true,
-        }],
-      });
-    } catch (e) {
-      console.warn('Error al enviar notificacion nativa:', e.message || e);
-    }
-  } else {
-    // Navegador web
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    try {
-      const n = new Notification(title, {
-        body,
-        icon: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        tag:  'safemap-report',
-        silent: false,
-      });
-      n.onclick = () => { window.focus(); n.close(); };
-      setTimeout(() => n.close(), 8000);
-    } catch (e) {
-      console.warn('Error notificacion web:', e);
-    }
-  }
+  if (isCapacitor()) return; // FCM lo maneja desde el servidor
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+      tag:  'safemap-report',
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 8000);
+  } catch (e) { console.warn('Error notificacion web:', e); }
 }
 
 // ============================================================
