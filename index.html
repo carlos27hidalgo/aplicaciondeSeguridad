@@ -451,8 +451,11 @@ async function onLoggedIn() {
   if (votes) votes.forEach(v => { myVotes[v.report_id] = v.vote; });
   await loadReports();
   subscribeRealtime();
-  locateUser();
-  requestNotificationPermission();
+
+  // Pedir permisos en secuencia — Android no permite pedir dos a la vez
+  // Primero ubicacion, luego notificaciones con un delay entre ellos
+  await locateUser();
+  setTimeout(() => requestNotificationPermission(), 2000);
 }
 
 async function doLogout() {
@@ -701,18 +704,26 @@ async function locateUser() {
     try {
       const { Geolocation } = window.Capacitor.Plugins;
       const perm = await Geolocation.requestPermissions();
-      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') { showToast('Permiso de ubicacion denegado'); return; }
+      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+        showToast('Permiso de ubicacion denegado');
+        return;
+      }
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
       renderUserMarker(pos.coords.latitude, pos.coords.longitude);
-    } catch (e) { showToast('No se pudo obtener tu ubicacion'); }
+    } catch (e) {
+      showToast('No se pudo obtener tu ubicacion');
+    }
     return;
   }
-  if (!navigator.geolocation) { showToast('Geolocalizacion no compatible'); return; }
-  navigator.geolocation.getCurrentPosition(
-    pos => renderUserMarker(pos.coords.latitude, pos.coords.longitude),
-    () => showToast('No se pudo obtener tu ubicacion'),
-    { enableHighAccuracy: true }
-  );
+  // Navegador web — devuelve una Promise para poder ser awaited
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { showToast('Geolocalizacion no compatible'); resolve(); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => { renderUserMarker(pos.coords.latitude, pos.coords.longitude); resolve(); },
+      ()  => { showToast('No se pudo obtener tu ubicacion'); resolve(); },
+      { enableHighAccuracy: true }
+    );
+  });
 }
 
 function renderUserMarker(lat, lng) {
