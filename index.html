@@ -781,34 +781,57 @@ async function requestNotificationPermission() {
       const perm = await FCM.requestPermissions();
       console.log('Permiso FCM:', perm.receive);
 
-      if (perm.receive === 'granted') {
-        // Paso 2: obtener el token FCM de este dispositivo
-        const { token } = await FCM.getToken();
-        console.log('Token FCM:', token);
+      // Paso 2: registrar listeners ANTES de pedir el token
+      // para no perder el evento tokenReceived
 
-        // Paso 3: guardar el token en Supabase asociado al usuario
-        // para que la Edge Function sepa a quien enviar la notificacion
+      // Cuando llega un token nuevo (al inicio o cuando se renueva)
+      FCM.addListener('tokenReceived', async (event) => {
+        const token = event.token;
+        console.log('Token FCM recibido:', token);
         if (currentUser && token) {
-          await sb.from('device_tokens').upsert({
+          const { error } = await sb.from('device_tokens').upsert({
             user_id:    currentUser.id,
             token,
             platform:   'android',
             updated_at: new Date().toISOString(),
           }, { onConflict: 'user_id' });
+          if (error) console.warn('Error guardando token:', error);
+          else console.log('Token guardado en Supabase');
         }
+      });
 
-        // Paso 4: escuchar notificaciones en background y cuando se toca
-        FCM.addListener('notificationActionPerformed', (action) => {
-          const reportId = action.notification?.data?.report_id;
-          if (reportId) showReportDetail(reportId);
-        });
+      // Cuando se toca la notificacion → abrir el reporte
+      FCM.addListener('notificationActionPerformed', (action) => {
+        const reportId = action.notification?.data?.report_id;
+        console.log('Notificacion tocada, reportId:', reportId);
+        if (reportId) showReportDetail(reportId);
+      });
 
-        // Paso 5: escuchar notificaciones con app en primer plano
-        FCM.addListener('notificationReceived', (notification) => {
-          const title = notification.notification?.title || 'SafeMap';
-          const body  = notification.notification?.body  || '';
-          showToast(title + ': ' + body);
-        });
+      // Cuando llega notificacion con app en primer plano
+      FCM.addListener('notificationReceived', (notification) => {
+        const title = notification.notification?.title || 'SafeMap';
+        const body  = notification.notification?.body  || '';
+        showToast(title + ': ' + body);
+      });
+
+      if (perm.receive === 'granted') {
+        // Paso 3: pedir el token despues de registrar los listeners
+        try {
+          const { token } = await FCM.getToken();
+          console.log('Token FCM obtenido:', token);
+          if (currentUser && token) {
+            const { error } = await sb.from('device_tokens').upsert({
+              user_id:    currentUser.id,
+              token,
+              platform:   'android',
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' });
+            if (error) console.warn('Error guardando token:', error);
+            else console.log('Token guardado correctamente en Supabase');
+          }
+        } catch (e) {
+          console.warn('Error obteniendo token, se esperara tokenReceived:', e.message);
+        }
       }
     } catch (e) {
       console.warn('Error al configurar FCM:', e);
